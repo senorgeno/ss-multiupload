@@ -21,18 +21,18 @@ class MultiUploadField extends FileField {
 	 */
 	protected $record;
 	
-	public function __construct($name, $title = null, SS_List $items = null) {
-
-		parent::__construct($name, $title);
-
-		if($items) $this->setItems($items);
-
-		// filter out '' since this would be a regex problem on JS end
-		$this->getValidator()->setAllowedExtensions(
-			array_filter(Config::inst()->get('File', 'allowed_extensions'))
-		); 
-		
-	}
+//	public function __construct($name, $title = null, SS_List $items = null) {
+//
+//		parent::__construct($name, $title);
+//
+//		if($items) $this->setItems($items);
+//
+//		// filter out '' since this would be a regex problem on JS end
+//		$this->getValidator()->setAllowedExtensions(
+//			array_filter(Config::inst()->get('File', 'allowed_extensions'))
+//		); 
+//		
+//	}
 	
 	public function Field($properties = array()) {
 		
@@ -124,7 +124,14 @@ class MultiUploadField extends FileField {
 		return $arrFiles;
 		
 	}
-
+	/**
+	 * Force a record to be used as "Parent" for uploaded Files (eg a Page with a has_one to File)
+	 * @param DataObject $record
+	 */
+	public function setRecord($record) {
+		$this->record = $record;
+		return $this;
+	}
 	/**
 	 * Get the record to use as "Parent" for uploaded Files (eg a Page with a has_one to File) If none is set, it will
 	 * use Form->getRecord() or Form->Controller()->data()
@@ -157,7 +164,7 @@ class MultiUploadField extends FileField {
 		
 		// Don't autodetermine relation if no relationship between parent record
 		if(!$this->relationAutoSetting) return $default;
-		
+					
 		// Check record and name
 		$name = $this->getName();
 		$record = $this->getRecord();
@@ -177,7 +184,7 @@ class MultiUploadField extends FileField {
 	 * @return File File object, or null if error
 	 */
 	protected function saveTemporaryFile($tmpFile, &$error = null) {
-		
+
 		// Determine container object
 		$error = null;
 		$fileObject = null;
@@ -242,7 +249,9 @@ class MultiUploadField extends FileField {
 	}
 	
 	public function saveInto(DataObjectInterface $record) {
-
+		
+		$this->setRecord($record);
+		
 		$fieldname = $this->getName();
 		
 		if(!isset($_FILES[$fieldname])) return false;
@@ -253,21 +262,25 @@ class MultiUploadField extends FileField {
 		
 		$relation = $record->hasMethod($fieldname) ? $record->$fieldname() : null;
 		$error = '';
+		$fileIDs = array();
 		foreach ($uploadedFiles as $uploadedFile){
 			
 			$file = $this->saveTemporaryFile($uploadedFile, $error);
 			if(empty($file)) {
 				return false;
 			}
-			//save the file to relation list on $record
-			if($relation && ($relation instanceof RelationList || $relation instanceof UnsavedRelationList)) {
-				$relation->setByIDList(array($file->ID));
-			}
-			elseif($record->has_one($fieldname)) {
-				$record->{"{$fieldname}ID"} = $file->ID;
-			}
+			$fileIDs[] = $file->ID;
+			
 		}
 
+		//save the file to relation list on $record
+		if($relation && ($relation instanceof RelationList || $relation instanceof UnsavedRelationList)) {
+			$relation->setByIDList($fileIDs);
+		}
+		elseif($record->has_one($fieldname)) {
+			$record->{"{$fieldname}ID"} = $fileIDs[0];
+		}
+		
 		return $this;
 		
 	}
