@@ -6,33 +6,27 @@
  *
  * @author Gene
  */
-class MultiUploadField extends FileField {
-	/**
-	 * Items loaded into this field. May be a RelationList, or any other SS_List
-	 * 
-	 * @var SS_List
-	 */
-	protected $items;
-	
-	/**
-	 * Parent data record. Will be infered from parent form or controller if blank.
-	 * 
-	 * @var DataObject
-	 */
-	protected $record;
-	
-//	public function __construct($name, $title = null, SS_List $items = null) {
-//
-//		parent::__construct($name, $title);
-//
-//		if($items) $this->setItems($items);
-//
-//		// filter out '' since this would be a regex problem on JS end
-//		$this->getValidator()->setAllowedExtensions(
-//			array_filter(Config::inst()->get('File', 'allowed_extensions'))
-//		); 
-//		
-//	}
+class MultiUploadField extends UploadField {
+
+	protected $ufConfig = array(
+		/**
+		 * Automatically upload the file once selected
+		 * 
+		 * @var boolean
+		 */
+		'autoUpload' => false,
+		/**
+		 * Restriction on number of files that may be set for this field. Set to null to allow
+		 * unlimited. If record has a has_one and allowedMaxFileNumber is null, it will be set to 1.
+		 * The resulting value will be set to maxNumberOfFiles
+		 * 
+		 * @var integer
+		 */
+		'allowedMaxFileNumber' => null,
+	    
+		'allowedMaxUpload' => null
+
+	);
 	
 	public function Field($properties = array()) {
 		
@@ -71,9 +65,17 @@ class MultiUploadField extends FileField {
 //);
 			  
 		$this->setTemplate('MultiUpload_Field');
-		return parent::Field($properties);
+		
+		$properties = array_merge($properties, array(
+			'MaxFileSize' => $this->getValidator()->getAllowedMaxFileSize()
+		));
+		
+		$obj = ($properties) ? $this->customise($properties) : $this;
+
+		return $obj->renderWith($this->getTemplates());
 		
 	}
+
 	
 	public function getAttributes() {
 		$attrs = array(
@@ -88,27 +90,6 @@ class MultiUploadField extends FileField {
 		return array_merge($attrs, $this->attributes);
 	}
 
-	/**
-	 * Sets the items assigned to this field as an SS_List of File objects.
-	 * Calling setItems will also update the value of this field, as well as 
-	 * updating the internal list of File items.
-	 * 
-	 * @param SS_List $items
-	 * @return UploadField self reference
-	 */	
-	public function setItems(SS_List $items) {
-		return $this->setValue(null, $items);
-	}
-
-	/**
-	 * Retrieves the current list of files
-	 * 
-	 * @return SS_List
-	 */
-	public function getItems() {
-		return $this->items ? $this->items : new ArrayList();
-	}
-	
 	protected function extractUploadedFileData($files){
 		
 		$keys = array_keys($files);
@@ -124,105 +105,54 @@ class MultiUploadField extends FileField {
 		return $arrFiles;
 		
 	}
+	
+	public function setAllowedMaxUpload($allowedMaxUpload) {
+		$number=substr($allowedMaxUpload,0,-2);
+		switch(strtoupper(substr($allowedMaxUpload,-2))){
+			case "KB":
+				$maxUpload = $allowedMaxUpload*1024;
+				break;
+			case "MB":
+				$maxUpload = $allowedMaxUpload*pow(1024,2);
+				break;
+			case "GB":
+				$maxUpload = $allowedMaxUpload*pow(1024,3);
+				break;
+			case "TB":
+				$maxUpload = $allowedMaxUpload*pow(1024,4);
+				break;
+			case "PB":
+				$maxUpload = $allowedMaxUpload*pow(1024,5);
+				break;
+			default:
+				$maxUpload = $allowedMaxUpload;
+		}
+		
+		return $this->setConfig('allowedMaxUpload', $maxUpload);
+	}
+	
+	public function getAllowedMaxUpload() {
+		$allowedMaxUpload = $this->getConfig('allowedMaxUpload');
+		
+		// if there is a has_one relation with that name on the record and 
+		// allowedMaxFileNumber has not been set, it's wanted to be 1
+		if(empty($allowedMaxUpload)) {
+			return null;
+		} 
+			
+		return $allowedMaxUpload;
+
+	}
+	
 	/**
-	 * Force a record to be used as "Parent" for uploaded Files (eg a Page with a has_one to File)
-	 * @param DataObject $record
+	 * Set the field value.
+	 * 
+	 * @param mixed $value
+	 * @return FormField Self reference
 	 */
-	public function setRecord($record) {
-		$this->record = $record;
+	public function setValue($value, $record = null) {
+		$this->value = $value;
 		return $this;
-	}
-	/**
-	 * Get the record to use as "Parent" for uploaded Files (eg a Page with a has_one to File) If none is set, it will
-	 * use Form->getRecord() or Form->Controller()->data()
-	 * 
-	 * @return DataObject
-	 */
-	public function getRecord() {
-		if (!$this->record && $this->form) {
-			if (($record = $this->form->getRecord()) && ($record instanceof DataObject)) {
-				$this->record = $record;
-			} elseif (($controller = $this->form->Controller())
-				&& $controller->hasMethod('data') 
-				&& ($record = $controller->data())
-				&& ($record instanceof DataObject)
-			) {
-				$this->record = $record;
-			}
-		}
-		return $this->record;
-	}
-	
-	/**
-	 * Gets the foreign class that needs to be created, or 'File' as default if there
-	 * is no relationship, or it cannot be determined.
-	 *
-	 * @param $default Default value to return if no value could be calculated
-	 * @return string Foreign class name.
-	 */
-	public function getRelationAutosetClass($default = 'File') {
-		
-		// Don't autodetermine relation if no relationship between parent record
-		if(!$this->relationAutoSetting) return $default;
-					
-		// Check record and name
-		$name = $this->getName();
-		$record = $this->getRecord();
-		if(empty($name) || empty($record)) {
-			return $default;
-		} else {
-			$class = $record->getRelationClass($name);
-			return empty($class) ? $default : $class;
-		}
-	}
-	
-	/**
-	 * Loads the temporary file data into a File object
-	 * 
-	 * @param array $tmpFile Temporary file data
-	 * @param string $error Error message
-	 * @return File File object, or null if error
-	 */
-	protected function saveTemporaryFile($tmpFile, &$error = null) {
-
-		// Determine container object
-		$error = null;
-		$fileObject = null;
-		
-		if (empty($tmpFile)) {
-			$error = _t('UploadField.FIELDNOTSET', 'File information not found');
-			return null;
-		}
-		
-		if($tmpFile['error']) {
-			$error = $tmpFile['error'];
-			return null;
-		}
-		
-		// Search for relations that can hold the uploaded files, but don't fallback
-		// to default if there is no automatic relation
-		if ($relationClass = $this->getRelationAutosetClass(null)) {
-			// Create new object explicitly. Otherwise rely on Upload::load to choose the class.
-			$fileObject = Object::create($relationClass);
-		}
-
-		// Get the uploaded file into a new file object.
-		try {
-			$this->upload->loadIntoFile($tmpFile, $fileObject, $this->getFolderName());
-		} catch (Exception $e) {
-			// we shouldn't get an error here, but just in case
-			$error = $e->getMessage();
-			return null;
-		}
-
-		// Check if upload field has an error
-		if ($this->upload->isError()) {
-			$error = implode(' ' . PHP_EOL, $this->upload->getErrors());
-			return null;
-		}
-		
-		// return file
-		return $this->upload->getFile();
 	}
 	
 	public function validate($validator) {
@@ -230,21 +160,53 @@ class MultiUploadField extends FileField {
 		$name = $this->getName();
 		
 		$files = $this->extractUploadedFileData($_FILES[$name]);
+
+		// Check max number of files 
+		$maxFiles = $this->getAllowedMaxFileNumber();
+		if($maxFiles && (count($files) > $maxFiles)) {
+			$validator->validationError(
+				$name,
+				_t(
+					'MultiUploadField.MAXNUMBEROFFILES', 
+					'Max number of {count} file(s) exceeded.',
+					array('count' => $maxFiles)
+				),
+				"validation"
+			);
+			return false;
+		}
 		
 		// Revalidate each file against nested validator
 		$this->upload->clearErrors();
+		$totalFileSize = 0;
 		foreach($files as $file) {
+			$totalFileSize += $file['size'];
 			$this->upload->validate($file);
 		}
 		
-		// Check all errors
+		// Check all errors from upload validator
 		if($errors = $this->upload->getErrors()) {
 			foreach($errors as $error) {
 				$validator->validationError($name, $error, "validation");
 			}
 			return false;
 		}
-		
+		$maxTotalUpload = $this->getAllowedMaxUpload();
+		//check total max upload	
+		if($totalFileSize > $maxTotalUpload){
+
+			$validator->validationError(
+				$name,
+				_t(
+					'MultiUploadField.MAXTOTALUPLOAD', 
+					'Max upload of {amount} has been exceeded.',
+					array('amount' => $maxTotalUpload)
+				),
+				"validation"
+			);
+			return false;
+		}
+
 		return true;
 	}
 	
